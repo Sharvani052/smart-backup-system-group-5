@@ -1,0 +1,103 @@
+import json
+import boto3
+import base64
+
+s3 = boto3.client('s3')
+BUCKET = "smart-backup-sharvani"
+
+def lambda_handler(event, context):
+
+    method = event["requestContext"]["http"]["method"]
+
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Methods": "*"
+    }
+
+    # ---------- POST ----------
+    if method == "POST":
+
+        body = event.get("body")
+
+        if event.get("isBase64Encoded"):
+            body = base64.b64decode(body).decode()
+
+        body = json.loads(body)
+
+        user = body["username"]
+        file = body["fileName"]
+        data = base64.b64decode(body["content"])
+
+        key = f"{user}/{file}"
+
+        s3.put_object(
+            Bucket=BUCKET,
+            Key=key,
+            Body=data
+        )
+
+        return {
+            "statusCode":200,
+            "headers":headers,
+            "body":json.dumps("uploaded")
+        }
+
+    # ---------- GET ----------
+    if method == "GET":
+
+        params = event.get("queryStringParameters") or {}
+        user = params.get("user")
+
+        # DELETE (FIXED)
+        if "delete" in params:
+
+            file = params["delete"]
+            key = f"{user}/{file}"
+
+            s3.delete_object(
+                Bucket=BUCKET,
+                Key=key
+            )
+
+            return {
+                "statusCode":200,
+                "headers":headers,
+                "body":json.dumps("deleted")
+            }
+
+        # DOWNLOAD
+        if "download" in params:
+
+            file = params["download"]
+            key = f"{user}/{file}"
+
+            obj = s3.get_object(Bucket=BUCKET, Key=key)
+
+            return {
+                "statusCode":200,
+                "headers":{
+                    "Content-Disposition":f'attachment; filename="{file}"',
+                    "Access-Control-Allow-Origin":"*"
+                },
+                "body":base64.b64encode(obj["Body"].read()).decode(),
+                "isBase64Encoded":True
+            }
+
+        # LIST FILES
+        resp = s3.list_objects_v2(
+            Bucket=BUCKET,
+            Prefix=f"{user}/"
+        )
+
+        files=[]
+
+        if "Contents" in resp:
+            for obj in resp["Contents"]:
+                files.append(obj["Key"].split("/")[1])
+
+        return {
+            "statusCode":200,
+            "headers":headers,
+            "body":json.dumps(files)
+        }
